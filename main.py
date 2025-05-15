@@ -61,7 +61,7 @@ except sqlite3.OperationalError:
 
 conn.commit()
 
-st.title("Sistema de Agendamento e Rotinas para Petshop")
+st.title("Sistema para ajudar a Tia Debora Querida")
 
 with st.sidebar:
     st.header("Menu")
