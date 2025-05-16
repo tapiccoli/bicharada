@@ -1,10 +1,28 @@
+
 import streamlit as st
 import sqlite3
 from datetime import datetime, timedelta
+import urllib.parse
+import pandas as pd
+import io
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+from reportlab.lib.pagesizes import letter
+from reportlab.lib import colors
 
 # Banco de dados
 conn = sqlite3.connect("database.db", check_same_thread=False)
 c = conn.cursor()
+
+
+# Criação da tabela de serviços
+c.execute('''
+CREATE TABLE IF NOT EXISTS servicos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome TEXT,
+    intervalo_dias INTEGER,
+    grupo TEXT,
+    retorno_personalizado_id INTEGER
+)''')
 
 # Criação da tabela de grupos de serviços
 c.execute('''CREATE TABLE IF NOT EXISTS grupos (
@@ -18,6 +36,51 @@ if not c.execute("SELECT 1 FROM grupos LIMIT 1").fetchone():
     for grupo in grupos_padrao:
         c.execute("INSERT OR IGNORE INTO grupos (nome) VALUES (?)", (grupo,))
     conn.commit()
+# — Criação das demais tabelas necessárias —
+c.execute('''CREATE TABLE IF NOT EXISTS pets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome TEXT,
+    tutor TEXT,
+    telefone TEXT,
+    email TEXT,
+    raca TEXT,
+    porte TEXT,
+    peso REAL,
+    nascimento_pet DATE,
+    nascimento_tutor DATE,
+    autorizacao_imagem TEXT,
+    tipo_pelagem TEXT,
+    mensalista INTEGER,
+    observacoes TEXT,
+    endereco TEXT
+)''' )
+c.execute('''CREATE TABLE IF NOT EXISTS historico_servicos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pet_id INTEGER,
+    servico_id INTEGER,
+    data DATE
+)''' )
+c.execute('''CREATE TABLE IF NOT EXISTS agendamentos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pet_id INTEGER,
+    data DATE
+)''' )
+c.execute('''CREATE TABLE IF NOT EXISTS transporte (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pet_id INTEGER,
+    endereco TEXT,
+    distancia_km REAL,
+    preco REAL,
+    data_registro TEXT
+)''' )
+c.execute('''CREATE TABLE IF NOT EXISTS transporte_compartilhado (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    endereco TEXT,
+    distancia_km REAL,
+    preco REAL,
+    data_registro TEXT
+)''' )
+conn.commit()
 
 # Corrige bancos antigos que ainda não têm a coluna 'grupo' em servicos
 try:
@@ -29,65 +92,47 @@ try:
 except sqlite3.OperationalError:
     pass
 
-# Corrige bancos antigos que ainda não têm a coluna 'peso'
-try:
-    c.execute("ALTER TABLE pets ADD COLUMN peso REAL")
-except sqlite3.OperationalError:
-    pass
-try:
-    c.execute("ALTER TABLE pets ADD COLUMN nascimento_pet DATE")
-except sqlite3.OperationalError:
-    pass
-try:
-    c.execute("ALTER TABLE pets ADD COLUMN nascimento_tutor DATE")
-except sqlite3.OperationalError:
-    pass
-try:
-    c.execute("ALTER TABLE pets ADD COLUMN autorizacao_imagem TEXT")
-except sqlite3.OperationalError:
-    pass
-try:
-    c.execute("ALTER TABLE pets ADD COLUMN tipo_pelagem TEXT")
-except sqlite3.OperationalError:
-    pass
-try:
-    c.execute("ALTER TABLE pets ADD COLUMN mensalista INTEGER")
-except sqlite3.OperationalError:
-    pass
-try:
-    c.execute("ALTER TABLE pets ADD COLUMN observacoes TEXT")
-except sqlite3.OperationalError:
-    pass
 
 conn.commit()
 
-st.title("Sistema para ajudar a Tia Debora Querida")
+st.title("Sistema Tia Debora")
 
 with st.sidebar:
     st.header("Menu")
-    menu = st.radio("", ["Cadastro de Pet", "Cadastro de Serviço", "Grupos de Serviços", "Registro de Serviço", "Agendamento", "Hoje", "Lembretes", "Consulta e Edição", "Transporte"])
+    menu = st.radio("", ["Cadastro de Pet", "Cadastro de Serviço", "Grupos de Serviços", "Registro de Serviço", "Agendamento", "Hoje", "Lembretes", "Consulta e Edição", "Transporte", "Ficha Individual"], key="menu_principal")
 
+
+try:
+    c.execute("ALTER TABLE pets ADD COLUMN email TEXT")
+except sqlite3.OperationalError:
+    pass
+
+# --- Cadastro de Pet ---
 if menu == "Cadastro de Pet":
     st.header("Cadastrar novo pet")
     nome = st.text_input("Nome do pet")
     tutor = st.text_input("Nome do tutor")
+    telefone = st.text_input("Telefone do tutor", placeholder="(DDD) 999999999")
+    email = st.text_input("Email do tutor")
     nascimento_pet = st.date_input("Data de nascimento do pet", format="DD/MM/YYYY")
     nascimento_tutor = st.date_input("Data de nascimento do tutor", format="DD/MM/YYYY")
     raca = st.text_input("Raça")
     porte = st.selectbox("Porte", ["Pequeno", "Médio", "Grande"])
-    peso = st.number_input("Peso (kg)", min_value=0.0, step=0.1)
+    peso = st.number_input("Peso (kg)", min_value=0.0)
     autorizacao_imagem = st.radio("Autorização de uso de imagem", ["Sim", "Não"])
     tipo_pelagem = st.selectbox("Tipo de pelagem", ["Curto", "Comprido", "Pelo de arame"])
     mensalista = st.checkbox("É mensalista?")
     observacoes = st.text_area("Observações")
+    endereco = st.text_input("Endereço")
     if st.button("Salvar"):
-        c.execute("""
-            INSERT INTO pets (nome, tutor, raca, porte, peso, nascimento_pet, nascimento_tutor, autorizacao_imagem, tipo_pelagem, mensalista, observacoes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (nome, tutor, raca, porte, peso, nascimento_pet, nascimento_tutor, autorizacao_imagem, tipo_pelagem, int(mensalista), observacoes))
+        c.execute(
+            "INSERT INTO pets (nome, tutor, telefone, email, raca, porte, peso, nascimento_pet, nascimento_tutor, autorizacao_imagem, tipo_pelagem, mensalista, observacoes, endereco) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (nome, tutor, telefone, email, raca, porte, peso, nascimento_pet.isoformat(), nascimento_tutor.isoformat(), autorizacao_imagem, tipo_pelagem, int(mensalista), observacoes, endereco)
+        )
         conn.commit()
         st.success("Pet cadastrado com sucesso!")
 
+# --- Grupos de Serviços ---
 elif menu == "Grupos de Serviços":
     st.header("Gerenciar grupos de serviços")
     grupos = c.execute("SELECT id, nome FROM grupos ORDER BY nome").fetchall()
@@ -112,6 +157,7 @@ elif menu == "Grupos de Serviços":
         except sqlite3.IntegrityError:
             st.error("Esse grupo já existe.")
 
+# --- Cadastro de Serviços ---
 elif menu == "Cadastro de Serviço":
     st.header("Cadastrar novo serviço de rotina")
     nome_servico = st.text_input("Nome do serviço")
@@ -133,6 +179,7 @@ elif menu == "Cadastro de Serviço":
         conn.commit()
         st.success("Serviço cadastrado!")
 
+# --- Registro de Serviços ---
 elif menu == "Registro de Serviço":
     st.header("Registrar serviço realizado")
     pets = c.execute("SELECT id, nome FROM pets").fetchall()
@@ -172,6 +219,7 @@ elif menu == "Registro de Serviço":
     else:
         st.warning("Cadastre ao menos um pet antes de registrar.")
 
+# --- Agendamento ---
 elif menu == "Agendamento":
     st.header("Agendar banho ou serviço")
     pets = c.execute("SELECT id, nome FROM pets").fetchall()
@@ -185,215 +233,603 @@ elif menu == "Agendamento":
     else:
         st.warning("Cadastre pets antes de agendar.")
 
+# --- Lembretes ---
 elif menu == "Lembretes":
-    st.header("Lembretes de serviços vencidos para pets NÃO agendados")
-    hoje = datetime.today().date()
+    st.header("🔔 Lembretes")
 
-    servicos_disponiveis = c.execute("SELECT id, nome FROM servicos").fetchall()
-    servico_escolhido = st.selectbox("Selecione o serviço para verificar pendências", servicos_disponiveis, format_func=lambda x: x[1])
+    # 1) Seleção de grupo
+    grupos_existentes = [g[0] for g in c.execute("SELECT nome FROM grupos ORDER BY nome").fetchall()]
+    grupo_escolhido = st.selectbox(
+        "Selecione o grupo de serviço",
+        grupos_existentes,
+        key="lembrete_grupo"
+    )
 
-    if servico_escolhido:
-        servico_id = servico_escolhido[0]
-        nome_servico = servico_escolhido[1]
-        intervalo_dias = c.execute("SELECT intervalo_dias FROM servicos WHERE id = ?", (servico_id,)).fetchone()[0]
+    # 2) Carrega serviços do grupo
+    servicos_do_grupo = c.execute(
+        "SELECT id, nome, intervalo_dias FROM servicos WHERE grupo = ?",
+        (grupo_escolhido,)
+    ).fetchall()
 
-        pets = c.execute("SELECT id, nome FROM pets").fetchall()
-        agendados_hoje_ids = [r[0] for r in c.execute("SELECT pet_id FROM agendamentos WHERE data = ?", (hoje,)).fetchall()]
+    if not servicos_do_grupo:
+        st.info("Não há serviços cadastrados neste grupo.")
+    else:
+        # 3) Definição do serviço para gerar lembretes
+        servico_escolhido = st.selectbox(
+            "Selecione o serviço para ver lembretes",
+            servicos_do_grupo,
+            format_func=lambda x: x[1],
+            key="lembrete_servico"
+        )
+        serv_id, serv_nome, intervalo = servico_escolhido
 
-        vencimentos = []
+        # 4) Busca pets e histórico
+        pets = c.execute("SELECT id, nome FROM pets ORDER BY nome").fetchall()
+        hoje = datetime.today().date()
+        lembretes = []
 
-        for pet in pets:
-            if pet[0] not in agendados_hoje_ids:
-                ultimo = c.execute("SELECT MAX(data) FROM historico_servicos WHERE pet_id = ? AND servico_id = ?", (pet[0], servico_id)).fetchone()[0]
-                if ultimo:
-                    ultimo_data = datetime.strptime(ultimo, "%Y-%m-%d").date()
-                    dias_passados = (hoje - ultimo_data).days
-                    atraso = dias_passados - intervalo_dias
-                    if atraso > 0:
-                        vencimentos.append((pet[1], atraso))
+        for pet_id, pet_nome in pets:
+            ultima = c.execute(
+                "SELECT MAX(data) FROM historico_servicos WHERE servico_id = ? AND pet_id = ?",
+                (serv_id, pet_id)
+            ).fetchone()[0]
 
-        if vencimentos:
-            vencimentos.sort(key=lambda x: x[1], reverse=True)
-            for nome_pet, dias in vencimentos:
-                if dias >= 7:
-                    st.error(f"🐶 {nome_pet} - {nome_servico} ({dias} dias de atraso)")
-                elif dias >= 3:
-                    st.warning(f"🐶 {nome_pet} - {nome_servico} ({dias} dias de atraso)")
-                else:
-                    st.info(f"🐶 {nome_pet} - {nome_servico} ({dias} dias de atraso)")
-        else:
-            st.success("Nenhum pet está com este serviço vencido sem estar agendado.")
-
-elif menu == "Hoje":
-    st.header("Agenda de hoje com rotinas sugeridas")
-    hoje = datetime.today().date()
-    agendados = c.execute("SELECT a.id, p.nome, p.id FROM agendamentos a JOIN pets p ON a.pet_id = p.id WHERE a.data = ?", (hoje,)).fetchall()
-    servicos = c.execute("SELECT id, nome, intervalo_dias FROM servicos").fetchall()
-    if agendados:
-        for ag in agendados:
-            st.subheader(f"🐶 {ag[1]}")
-            texto_rotinas = []
-            for serv in servicos:
-                ultimo = c.execute("SELECT MAX(data) FROM historico_servicos WHERE pet_id = ? AND servico_id = ?", (ag[2], serv[0])).fetchone()[0]
-                if ultimo:
-                    ultimo_data = datetime.strptime(ultimo, "%Y-%m-%d").date()
-                    dias_passados = (hoje - ultimo_data).days
-                    if dias_passados >= serv[2]:
-                        texto_rotinas.append(f"{serv[1]} ({dias_passados - serv[2]} dias)")
-            if texto_rotinas:
-                st.warning("\n".join(texto_rotinas))
+            if ultima:
+                data_ultima = datetime.strptime(ultima, "%Y-%m-%d").date()
+                dias_passados = (hoje - data_ultima).days
             else:
-                st.info("Nenhuma rotina pendente para hoje.")
+                dias_passados = None
+
+            # Se intervalo definido e já passou, adiciona lembrete
+            if intervalo is not None and dias_passados is not None and dias_passados >= intervalo:
+                lembretes.append((pet_nome, dias_passados))
+
+        # 5) Exibe resultados
+        if lembretes:
+            st.markdown(f"**Lembretes para {serv_nome}:**")
+            for pet_nome, dias in lembretes:
+                st.write(f"- {pet_nome}: {dias} dias desde o último atendimento")
+        else:
+            st.success(f"Nenhum lembrete pendente para {serv_nome}.")
+
+# --- Hoje ---
+elif menu == "Hoje":
+    from datetime import datetime
+
+    st.header("⏰ Pendências de Hoje")
+
+    # 1) Escolha do grupo
+    grupos_existentes = [g[0] for g in c.execute("SELECT nome FROM grupos ORDER BY nome").fetchall()]
+    grupo_escolhido = st.selectbox(
+        "Selecione o grupo de serviço",
+        grupos_existentes,
+        key="hoje_grupo"
+    )
+
+    # 2) Carrega serviços e pets
+    servicos_do_grupo = c.execute(
+        "SELECT id, nome, intervalo_dias FROM servicos WHERE grupo = ?",
+        (grupo_escolhido,)
+    ).fetchall()
+    pets_lista = c.execute(
+        "SELECT id, nome FROM pets ORDER BY nome"
+    ).fetchall()
+
+    hoje = datetime.today().date()
+    pendentes = []
+
+    # 3) Para cada serviço e cada pet, verifica a última data
+    for serv in servicos_do_grupo:
+        serv_id, serv_nome, intervalo = serv
+        # ignora serviços sem intervalo definido
+        if intervalo is None:
+            continue
+
+        for pet in pets_lista:
+            pet_id, pet_nome = pet
+
+            # Busca a última data deste serviço para este pet
+            ultima = c.execute(
+                """
+                SELECT MAX(data)
+                  FROM historico_servicos
+                 WHERE servico_id = ? AND pet_id = ?
+                """,
+                (serv_id, pet_id)
+            ).fetchone()[0]
+
+            if ultima:
+                data_ultima = datetime.strptime(ultima, "%Y-%m-%d").date()
+                dias_passados = (hoje - data_ultima).days
+            else:
+                # Se nunca foi feito, conta desde sempre
+                dias_passados = None
+
+            # Se já passou do intervalo, marca como pendente
+            if dias_passados is not None and dias_passados >= intervalo:
+                pendentes.append((pet_nome, serv_nome, dias_passados))
+
+    # 4) Exibe resultados
+    if pendentes:
+        st.markdown("**Serviços pendentes:**")
+        for pet_nome, serv_nome, dias in pendentes:
+            st.write(f"- **{pet_nome}** → {serv_nome}: {dias} dias desde o último atendimento")
     else:
-        st.success("Nenhum pet agendado para hoje.")
+        st.success("Nenhum serviço pendente para hoje.")
 
-elif menu == "Transporte":
-    st.header("Cadastro de transporte")
-    c.execute("""CREATE TABLE IF NOT EXISTS transporte (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        pet_id INTEGER,
-        endereco TEXT,
-        distancia_km REAL,
-        preco REAL,
-        data_registro TEXT
-    )""")
-    conn.commit()
+# --- Transporte ---
 
-    pets = c.execute("SELECT id, nome, tutor FROM pets").fetchall()
+# Inicialização da variável de transporte para controle de interface
+if 'tipo_transporte' not in st.session_state:
+    st.session_state['tipo_transporte'] = 'Exclusivo'
+
+c.execute("""CREATE TABLE IF NOT EXISTS transporte (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pet_id INTEGER,
+    endereco TEXT,
+    distancia_km REAL,
+    preco REAL,
+    data_registro TEXT
+)""")
+conn.commit()
+
+
+# --- Criação e migração das tabelas ---
+c.execute('''
+CREATE TABLE IF NOT EXISTS historico_servicos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pet_id INTEGER,
+    servico_id INTEGER,
+    data DATE
+)''')
+
+c.execute('''
+CREATE TABLE IF NOT EXISTS agendamentos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pet_id INTEGER,
+    data DATE
+)''')
+c.execute('''CREATE TABLE IF NOT EXISTS pets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome TEXT,
+    tutor TEXT,
+    telefone TEXT,
+    email TEXT,
+    raca TEXT,
+    porte TEXT,
+    peso REAL,
+    nascimento_pet DATE,
+    nascimento_tutor DATE,
+    autorizacao_imagem TEXT,
+    tipo_pelagem TEXT,
+    mensalista INTEGER,
+    observacoes TEXT,
+    endereco TEXT
+)''')
+c.execute("""CREATE TABLE IF NOT EXISTS transporte (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pet_id INTEGER,
+    endereco TEXT,
+    distancia_km REAL,
+    preco REAL,
+    data_registro TEXT
+)""")
+c.execute("""CREATE TABLE IF NOT EXISTS transporte_compartilhado (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    endereco TEXT,
+    distancia_km REAL,
+    preco REAL,
+    data_registro TEXT
+)""")
+conn.commit()
+
+
+# --- Ficha Individual ---
+if menu == "Ficha Individual":
+    st.header("Ficha do Pet")
+    pets = c.execute("SELECT id, nome, tutor FROM pets ORDER BY nome").fetchall()
     if pets:
-        pet = st.selectbox("Selecione o pet para transporte", pets, format_func=lambda x: f"{x[1]} ({x[2]})")
-        endereco = st.text_input("Endereço de busca ou entrega")
-        if st.button("Calcular distância e preço"):
-            endereco_petshop = "Rua Demétrio Moreira da Luz, 1251, Caxias do Sul - RS"
-            base_url = "https://www.google.com/maps/dir/"
-            import urllib.parse
-            endereco_petshop_encoded = urllib.parse.quote(endereco_petshop)
-            endereco_encoded = urllib.parse.quote(endereco)
-            url = f"{base_url}{endereco_petshop_encoded}/{endereco_encoded}"
-            st.markdown(f"[Abrir rota no Google Maps]({url})")
-            st.info("Copie a distância (em km) mostrada no Google Maps e insira abaixo.")
+        pet = st.selectbox("Selecione o pet", pets, format_func=lambda x: f"{x[1]} ({x[2]})")
+        subtab = st.radio("Aba", ["Histórico", "Pagamentos Pendentes"])
 
-        distancia = st.number_input("Distância em km (copiada do Google Maps)", min_value=0.0, step=0.1)
-        preco = distancia * 1.30
-        st.write(f"💰 Preço estimado: R$ {preco:.2f}")
-
-        if st.button("Salvar transporte") and endereco:
-            hoje = datetime.today().strftime("%Y-%m-%d")
-            c.execute("INSERT INTO transporte (pet_id, endereco, distancia_km, preco, data_registro) VALUES (?, ?, ?, ?, ?)",
-                      (pet[0], endereco, distancia, preco, hoje))
-            conn.commit()
-            st.success("Transporte registrado com sucesso!")
-
-        st.subheader("Registros de Transporte")
-        registros = c.execute("""
-            SELECT t.data_registro, p.nome, t.endereco, t.distancia_km, t.preco
-            FROM transporte t
-            JOIN pets p ON t.pet_id = p.id
-            ORDER BY t.data_registro DESC
-        """).fetchall()
-        if registros:
-            for reg in registros:
-                st.markdown(
-    f"**🐾 {reg[1]}** - {reg[0]}  \n"
-    f"📍 {reg[2]}  \n"
-    f"📏 {reg[3]:.1f} km - 💰 R$ {reg[4]:.2f}"
-)
-
-
-                st.markdown("---")
-    else:
-        st.warning("Cadastre pets antes de usar transporte.")
-
-elif menu == "Consulta e Edição":
-    st.header("Consultar e editar registros")
-    tab = st.radio("Escolha", ["Pets", "Serviços", "Agendamentos", "Histórico de Serviços"])
-
-    if tab == "Pets":
-        pets = c.execute("SELECT id, nome FROM pets").fetchall()
-        if pets:
-            pet = st.selectbox("Selecione o pet", pets, format_func=lambda x: x[1])
-            dados = c.execute("SELECT nome, tutor, raca, porte, peso, nascimento_pet, nascimento_tutor, autorizacao_imagem, tipo_pelagem, mensalista, observacoes FROM pets WHERE id = ?", (pet[0],)).fetchone()
-            nome_edit = st.text_input("Nome", value=dados[0])
-            tutor_edit = st.text_input("Tutor", value=dados[1])
-            raca_edit = st.text_input("Raça", value=dados[2])
-            porte_edit = st.selectbox("Porte", ["Pequeno", "Médio", "Grande"], index=["Pequeno", "Médio", "Grande"].index(dados[3]))
-            peso_edit = st.number_input("Peso (kg)", min_value=0.0, step=0.1, value=dados[4])
-            nascimento_pet_edit = st.date_input("Data de nascimento do pet", value=datetime.strptime(dados[5], "%Y-%m-%d"), format="DD/MM/YYYY")
-            nascimento_tutor_edit = st.date_input("Data de nascimento do tutor", value=datetime.strptime(dados[6], "%Y-%m-%d"), format="DD/MM/YYYY")
-            autorizacao_edit = st.radio("Autorização de uso de imagem", ["Sim", "Não"], index=["Sim", "Não"].index(dados[7]))
-            pelagem_edit = st.selectbox("Tipo de pelagem", ["Curto", "Comprido", "Pelo de arame"], index=["Curto", "Comprido", "Pelo de arame"].index(dados[8]))
-            mensalista_edit = st.checkbox("É mensalista?", value=bool(dados[9]))
-            observacoes_edit = st.text_area("Observações", value=dados[10])
-            if st.button("Salvar alterações"):
-                c.execute("""
-                    UPDATE pets
-                    SET nome = ?, tutor = ?, raca = ?, porte = ?, peso = ?, nascimento_pet = ?, nascimento_tutor = ?, autorizacao_imagem = ?, tipo_pelagem = ?, mensalista = ?, observacoes = ?
-                    WHERE id = ?
-                """, (nome_edit, tutor_edit, raca_edit, porte_edit, peso_edit, nascimento_pet_edit, nascimento_tutor_edit, autorizacao_edit, pelagem_edit, int(mensalista_edit), observacoes_edit, pet[0]))
-                conn.commit()
-                st.success("Pet atualizado com sucesso!")
-                
-
-    elif tab == "Serviços":
-        grupos_existentes = [g[0] for g in c.execute("SELECT nome FROM grupos ORDER BY nome").fetchall()]
-        grupo_filtro = st.selectbox("Selecione o grupo de serviço", grupos_existentes if grupos_existentes else ["Nenhum grupo disponível"])
-        servicos = c.execute("SELECT id, nome FROM servicos WHERE grupo = ?", (grupo_filtro,)).fetchall()
-        if servicos:
-            serv = st.selectbox("Selecione o serviço", servicos, format_func=lambda x: x[1])
-            dados = c.execute("SELECT nome, intervalo_dias, grupo FROM servicos WHERE id = ?", (serv[0],)).fetchone()
-            nome_edit = st.text_input("Nome do serviço", value=dados[0])
-            intervalo_edit = st.number_input("Intervalo (dias)", min_value=1, value=dados[1])
-            grupo_edit = st.selectbox("Grupo do serviço", grupos_existentes if grupos_existentes else ["Nenhum grupo disponível"], index=grupos_existentes.index(dados[2]) if dados[2] in grupos_existentes else 0)
-            if st.button("Salvar alterações"):
-                c.execute("UPDATE servicos SET nome = ?, intervalo_dias = ?, grupo = ? WHERE id = ?", (nome_edit, intervalo_edit, grupo_edit, serv[0]))
-                conn.commit()
-                st.success("Serviço atualizado com sucesso!")
-
-    elif tab == "Agendamentos":
-        ags = c.execute("SELECT a.id, p.nome, a.data FROM agendamentos a JOIN pets p ON a.pet_id = p.id ORDER BY a.data DESC").fetchall()
-        if ags:
-            ag = st.selectbox("Selecione o agendamento", ags, format_func=lambda x: f"{x[1]} em {datetime.strptime(x[2], '%Y-%m-%d').strftime('%d/%m/%Y')}")
-            pets = c.execute("SELECT id, nome FROM pets").fetchall()
-            pet_id_original = c.execute("SELECT pet_id FROM agendamentos WHERE id = ?", (ag[0],)).fetchone()[0]
-            pet_edit = st.selectbox("Pet", pets, format_func=lambda x: x[1], index=[p[0] for p in pets].index(pet_id_original))
-            data_edit = st.date_input("Data do agendamento", value=datetime.strptime(ag[2], "%Y-%m-%d"), format="DD/MM/YYYY")
-            if st.button("Salvar alterações do agendamento"):
-                c.execute("UPDATE agendamentos SET pet_id = ?, data = ? WHERE id = ?", (pet_edit[0], data_edit, ag[0]))
-                conn.commit()
-                st.success("Agendamento atualizado com sucesso!")
-            if st.checkbox("Deseja realmente excluir este agendamento?"):
-                if st.button("Confirmar exclusão"):
-                    c.execute("DELETE FROM agendamentos WHERE id = ?", (ag[0],))
-                    conn.commit()
-                    st.warning("Agendamento excluído com sucesso!")
-
-    elif tab == "Histórico de Serviços":
-        pets_disponiveis = c.execute("SELECT id, nome FROM pets").fetchall()
-        if pets_disponiveis:
-            pet_selecionado = st.selectbox("Selecione o pet para filtrar os registros", pets_disponiveis, format_func=lambda x: x[1])
-            registros = c.execute("""
-                SELECT h.id, p.nome, s.nome, h.data
+        if subtab == "Histórico":
+            st.subheader("📝 Histórico de Serviços e Transportes")
+            historico_servicos = c.execute("""
+                SELECT 'Serviço', s.nome, h.data
                 FROM historico_servicos h
-                JOIN pets p ON h.pet_id = p.id
                 JOIN servicos s ON h.servico_id = s.id
                 WHERE h.pet_id = ?
-                ORDER BY h.data DESC
-            """, (pet_selecionado[0],)).fetchall()
-            if registros:
-                reg = st.selectbox("Selecione o registro de serviço", registros, format_func=lambda x: f"{x[1]} - {x[2]} em {datetime.strptime(x[3], '%Y-%m-%d').strftime('%d/%m/%y')}")
-            pets = c.execute("SELECT id, nome FROM pets").fetchall()
-            servicos = c.execute("SELECT id, nome FROM servicos").fetchall()
-            pet_id = c.execute("SELECT pet_id FROM historico_servicos WHERE id = ?", (reg[0],)).fetchone()[0]
-            pet_edit = st.selectbox("Pet", pets, format_func=lambda x: x[1], index=[p[0] for p in pets].index(pet_id))
-            servico_id = c.execute("SELECT servico_id FROM historico_servicos WHERE id = ?", (reg[0],)).fetchone()[0]
-            servico_edit = st.selectbox("Serviço", servicos, format_func=lambda x: x[1], index=[s[0] for s in servicos].index(servico_id))
-            data_edit = st.date_input("Data de realização", value=datetime.strptime(reg[3], "%Y-%m-%d"), format="DD/MM/YYYY")
-            if st.button("Salvar alterações do serviço"):
-                c.execute("UPDATE historico_servicos SET pet_id = ?, servico_id = ?, data = ? WHERE id = ?", (pet_edit[0], servico_edit[0], data_edit, reg[0]))
-                conn.commit()
-                st.success("Registro de serviço atualizado com sucesso!")
-            if st.checkbox("Deseja realmente excluir este registro de serviço?"):
-                if st.button("Confirmar exclusão"):
-                    c.execute("DELETE FROM historico_servicos WHERE id = ?", (reg[0],))
+                UNION
+                SELECT 'Transporte', 'Transporte registrado', t.data_registro
+                FROM transporte t
+                WHERE t.pet_id = ?
+                ORDER BY 3 DESC
+            """, (pet[0], pet[0])).fetchall()
+
+            for tipo, descricao, data in historico_servicos:
+                st.markdown(f"📌 <b>{tipo}</b> — {descricao} <br><small>{datetime.strptime(data, '%Y-%m-%d').strftime('%d/%m/%Y')}</small>", unsafe_allow_html=True)
+
+            # Exportar histórico
+            df_historico = pd.DataFrame(historico_servicos, columns=["Tipo", "Descrição", "Data"])
+            colpdf, colexcel = st.columns(2)
+            with colpdf:
+                if st.button("📄 Exportar como PDF"):
+                    buffer = io.BytesIO()
+                    doc = SimpleDocTemplate(buffer, pagesize=letter)
+                    elements = [Table([["Tipo", "Descrição", "Data"]] + df_historico.values.tolist())]
+                    elements[0].setStyle(TableStyle([
+                        ('BACKGROUND', (0,0), (-1,0), colors.grey),
+                        ('TEXTCOLOR',(0,0),(-1,0),colors.whitesmoke),
+                        ('ALIGN',(0,0),(-1,-1),'LEFT'),
+                        ('FONTNAME', (0,0),(-1,0), 'Helvetica-Bold'),
+                        ('BOTTOMPADDING', (0,0),(-1,0), 12),
+                        ('BACKGROUND',(0,1),(-1,-1),colors.beige),
+                        ('GRID', (0,0), (-1,-1), 1, colors.black),
+                    ]))
+                    doc.build(elements)
+                    buffer.seek(0)
+                    st.download_button("📥 Baixar PDF", buffer, file_name=f"historico_{pet[1].replace(' ', '_')}_{pet[2].replace(' ', '_')}.pdf")
+            with colexcel:
+                csv = df_historico.to_csv(index=False).encode('utf-8')
+                st.download_button("📊 Baixar Excel", csv, file_name=f"historico_{pet[1].replace(' ', '_')}_{pet[2].replace(' ', '_')}.csv", mime="text/csv")
+    elif subtab == "Pagamentos Pendentes":
+            st.subheader("💸 Pagamentos Pendentes")
+            pagamentos = c.execute("SELECT id, endereco, preco, data_registro FROM transporte WHERE pet_id = ? ORDER BY data_registro DESC", (pet[0],)).fetchall()
+            agrupamento_pag = st.radio("Como deseja agrupar os pagamentos?", ["Por pet", "Por tutor"], horizontal=True)
+            if agrupamento_pag == "Por tutor":
+                tutor_map = dict(c.execute("SELECT id, tutor FROM pets"))
+                pagamentos = [(tutor_map.get(pet[0], "Desconhecido"), end, preco, data) for transp_id, end, preco, data in pagamentos]
+            else:
+                pagamentos = [(pet[1], end, preco, data) for transp_id, end, preco, data in pagamentos]
+            if pagamentos:
+                for transp_id, end, preco, data in pagamentos:
+                    cols = st.columns([5, 1])
+                    with cols[0]:
+                        st.markdown(f"📍 <b>Endereço:</b> {end}<br>💰 <b>Valor:</b> R$ {preco:.2f}<br>📅 <small>{datetime.strptime(data, '%Y-%m-%d').strftime('%d/%m/%Y')}</small>", unsafe_allow_html=True)
+                    with cols[1]:
+                        if st.button("Marcar como pago", key=f"pago_{transp_id}"):
+                            c.execute("UPDATE transporte SET preco = 0 WHERE id = ?", (transp_id,))
+                            conn.commit()
+                            st.experimental_rerun()
+            else:
+                st.info("Nenhum pagamento registrado para este pet.")
+    else:
+        st.warning("Nenhum pet cadastrado.")
+
+
+elif menu == "Consulta e Edição":
+    st.header("📋 Consulta e Edição")
+
+    # Cria as 4 sub-abas
+    consultas = st.tabs([
+        "🐾 Pets",
+        "🛠 Serviços",
+        "📅 Agendamentos",
+        "📜 Histórico de Serviços"
+    ])
+
+    # ----------------------- Pets -----------------------
+    with consultas[0]:
+        st.subheader("🖊 Editar / 🗑️ Excluir Pet")
+
+        pets_lista = c.execute(
+            "SELECT id, nome FROM pets ORDER BY nome"
+        ).fetchall()
+        if not pets_lista:
+            st.warning("Nenhum pet cadastrado.")
+        else:
+            opções = {f"{p[1]} ({p[0]})": p[0] for p in pets_lista}
+            escolha = st.selectbox("Selecione o pet", list(opções.keys()), key="edit_pet_select")
+            pet_id = opções[escolha]
+
+            # Carrega dados
+            row = c.execute("""
+                SELECT nome, tutor, telefone, email, raca, porte, peso,
+                       nascimento_pet, nascimento_tutor, autorizacao_imagem,
+                       tipo_pelagem, mensalista, observacoes, endereco
+                  FROM pets WHERE id = ?
+            """, (pet_id,)).fetchone()
+
+            (nome, tutor, telefone, email, raca, porte, peso,
+             nasc_pet, nasc_tut, auth_img, tipo_pel, mensalista,
+             obs, endereco) = row
+
+            # Campos editáveis
+            novo_nome     = st.text_input("Nome", value=nome, key="edit_nome")
+            novo_tutor    = st.text_input("Tutor", value=tutor, key="edit_tutor")
+            novo_telefone = st.text_input("Telefone", value=telefone, key="edit_telefone")
+            novo_email    = st.text_input("Email", value=email, key="edit_email")
+            novo_raca     = st.text_input("Raça", value=raca, key="edit_raca")
+            novo_porte    = st.text_input("Porte", value=porte, key="edit_porte")
+            novo_peso     = st.number_input("Peso (kg)", value=peso or 0.0, step=0.1, key="edit_peso")
+            novo_nasc_pet = st.date_input("Nascimento do pet", value=nasc_pet, key="edit_nasc_pet")
+            novo_nasc_tut = st.date_input("Nascimento do tutor", value=nasc_tut, key="edit_nasc_tut")
+            novo_auth     = st.selectbox("Autorização de imagem", ["Sim", "Não"], index=0 if auth_img=="Sim" else 1, key="edit_auth_img")
+            novo_tipo_pel = st.text_input("Tipo de pelagem", value=tipo_pel, key="edit_tipo_pel")
+            novo_mensal   = st.checkbox("Mensalista", value=bool(mensalista), key="edit_mensalista")
+            novo_obs      = st.text_area("Observações", value=obs, key="edit_obs")
+            novo_endereco = st.text_input("Endereço", value=endereco or "", key="edit_endereco")
+
+            st.markdown("---")
+            col_salvar, col_excluir = st.columns(2)
+            with col_salvar:
+                if st.button("💾 Salvar alterações", key="botao_salvar_pet"):
+                    c.execute("""
+                        UPDATE pets SET
+                          nome              = ?,
+                          tutor             = ?,
+                          telefone          = ?,
+                          email             = ?,
+                          raca              = ?,
+                          porte             = ?,
+                          peso              = ?,
+                          nascimento_pet    = ?,
+                          nascimento_tutor  = ?,
+                          autorizacao_imagem= ?,
+                          tipo_pelagem      = ?,
+                          mensalista        = ?,
+                          observacoes       = ?,
+                          endereco          = ?
+                        WHERE id = ?
+                    """, (
+                        novo_nome, novo_tutor, novo_telefone, novo_email,
+                        novo_raca, novo_porte, novo_peso,
+                        novo_nasc_pet, novo_nasc_tut,
+                        novo_auth, novo_tipo_pel,
+                        int(novo_mensal), novo_obs, novo_endereco,
+                        pet_id
+                    ))
                     conn.commit()
-                    st.warning("Registro de serviço excluído com sucesso!")
+                    st.success("Pet atualizado com sucesso!")
+            with col_excluir:
+                if st.button("🗑️ Excluir pet", key="botao_excluir_pet"):
+                    c.execute("DELETE FROM pets WHERE id = ?", (pet_id,))
+                    conn.commit()
+                    st.warning("Pet excluído com sucesso!")
+                    st.experimental_rerun()
+
+    # --------------------- Serviços ---------------------
+    with consultas[1]:
+        st.subheader("🔧 Editar / 🗑️ Excluir Serviços")
+
+        grupos_exist = [g[0] for g in c.execute("SELECT nome FROM grupos").fetchall()]
+        filtro_grupo = st.selectbox(
+            "Grupo",
+            grupos_exist,
+            key="consulta_filtro_grupo"
+        )
+
+        servs = c.execute(
+            "SELECT id, nome, intervalo_dias FROM servicos WHERE grupo = ?",
+            (filtro_grupo,)
+        ).fetchall()
+
+        if servs:
+            serv_id, serv_nome, serv_int = st.selectbox(
+                "Serviço",
+                servs,
+                format_func=lambda x: x[1],
+                key="consulta_select_servico"
+            )
+            novo_nome_s = st.text_input(
+                "Nome do serviço",
+                value=serv_nome,
+                key="consulta_edit_nome_servico"
+            )
+            novo_int_s = st.number_input(
+                "Intervalo (dias)",
+                min_value=1,
+                value=serv_int,
+                key="consulta_edit_intervalo_servico"
+            )
+            novo_grp_s = st.selectbox(
+                "Grupo",
+                grupos_exist,
+                index=grupos_exist.index(filtro_grupo),
+                key="consulta_edit_grupo_servico"
+            )
+
+            col_sv, col_del = st.columns(2)
+            with col_sv:
+                if st.button("💾 Salvar serviço", key="consulta_salvar_servico"):
+                    c.execute("""
+                        UPDATE servicos
+                           SET nome = ?, intervalo_dias = ?, grupo = ?
+                         WHERE id = ?
+                    """, (novo_nome_s, novo_int_s, novo_grp_s, serv_id))
+                    conn.commit()
+                    st.success("Serviço atualizado!")
+            with col_del:
+                if st.button("🗑️ Excluir serviço", key="consulta_excluir_servico"):
+                    c.execute("DELETE FROM servicos WHERE id = ?", (serv_id,))
+                    conn.commit()
+                    st.warning("Serviço excluído!")
+                    st.experimental_rerun()
+        else:
+            st.info("Nenhum serviço cadastrado neste grupo.")
+
+    # -------------------- Agendamentos --------------------
+    with consultas[2]:
+        st.subheader("📆 Editar / 🗑️ Excluir Agendamentos")
+
+        ags = c.execute("""
+            SELECT a.id, p.nome, a.data
+              FROM agendamentos a
+              JOIN pets p ON a.pet_id = p.id
+             ORDER BY a.data DESC
+        """).fetchall()
+
+        if ags:
+            ag_id, pet_nome, ag_data = st.selectbox(
+                "Agendamento",
+                ags,
+                format_func=lambda x: f"{x[1]} em {x[2]}",
+                key="consulta_select_agendamento"
+            )
+            pets_all = c.execute("SELECT id, nome FROM pets").fetchall()
+            pet_ids = [p[0] for p in pets_all]
+            pet_sel = st.selectbox(
+                "Pet",
+                pets_all,
+                index=pet_ids.index(
+                    c.execute("SELECT pet_id FROM agendamentos WHERE id = ?", (ag_id,)).fetchone()[0]
+                ),
+                format_func=lambda x: x[1],
+                key="consulta_edit_ag_pet"
+            )
+            data_sel = st.date_input(
+                "Data",
+                value=datetime.strptime(ag_data, "%Y-%m-%d"),
+                key="consulta_edit_ag_data"
+            )
+
+            col_sv2, col_del2 = st.columns(2)
+            with col_sv2:
+                if st.button("💾 Salvar agendamento", key="consulta_salvar_ag"):
+                    c.execute("""
+                        UPDATE agendamentos
+                           SET pet_id = ?, data = ?
+                         WHERE id = ?
+                    """, (pet_sel[0], data_sel, ag_id))
+                    conn.commit()
+                    st.success("Agendamento atualizado!")
+            with col_del2:
+                if st.button("🗑️ Excluir agendamento", key="consulta_excluir_ag"):
+                    c.execute("DELETE FROM agendamentos WHERE id = ?", (ag_id,))
+                    conn.commit()
+                    st.warning("Agendamento excluído!")
+                    st.experimental_rerun()
+        else:
+            st.info("Nenhum agendamento cadastrado.")
+
+    # --------------- Histórico de Serviços ---------------
+    with consultas[3]:
+        st.subheader("📜 Editar / 🗑️ Excluir Histórico de Serviços")
+
+        pets_all = c.execute("SELECT id, nome FROM pets").fetchall()
+        pet_filter = st.selectbox(
+            "Filtrar por pet",
+            pets_all,
+            format_func=lambda x: x[1],
+            key="consulta_hist_pet"
+        )
+        regs = c.execute("""
+            SELECT h.id, s.nome, h.data
+              FROM historico_servicos h
+              JOIN servicos s ON h.servico_id = s.id
+             WHERE h.pet_id = ?
+             ORDER BY h.data DESC
+        """, (pet_filter[0],)).fetchall()
+
+        if regs:
+            reg_id, serv_nome2, data2 = st.selectbox(
+                "Registro",
+                regs,
+                format_func=lambda x: f"{x[1]} em {x[2]}",
+                key="consulta_select_historico"
+            )
+            data_edit2 = st.date_input(
+                "Data de realização",
+                value=datetime.strptime(data2, "%Y-%m-%d"),
+                key="consulta_edit_historico_data"
+            )
+
+            col_sv3, col_del3 = st.columns(2)
+            with col_sv3:
+                if st.button("💾 Salvar histórico", key="consulta_salvar_historico"):
+                    c.execute("""
+                        UPDATE historico_servicos
+                           SET data = ?
+                         WHERE id = ?
+                    """, (data_edit2, reg_id))
+                    conn.commit()
+                    st.success("Histórico atualizado!")
+            with col_del3:
+                if st.button("🗑️ Excluir histórico", key="consulta_excluir_historico"):
+                    c.execute("DELETE FROM historico_servicos WHERE id = ?", (reg_id,))
+                    conn.commit()
+                    st.warning("Histórico excluído!")
+                    st.experimental_rerun()
+        else:
+            st.info("Nenhum histórico para este pet.")
+
+# --- Transporte ---
+elif menu == "Transporte":
+    st.header("🚚 Transporte")
+
+    # Busca lista de pets e endereços
+    pets_lista = c.execute(
+        "SELECT id, nome, endereco FROM pets ORDER BY nome"
+    ).fetchall()
+    nomes = ["Nenhum"] + [f"{p[1]} ({p[0]})" for p in pets_lista]
+
+    if len(nomes) <= 1:
+        st.warning("Cadastre ao menos um pet para usar o transporte.")
+    else:
+        # Seleção de até 6 animais e coleta de endereços
+        enderecos = []
+        for i in range(1, 7):
+            col1, col2 = st.columns([2, 3])
+            with col1:
+                selecao = st.selectbox(f"Animal {i}", nomes, key=f"trans_pet_{i}")
+            with col2:
+                if selecao != "Nenhum":
+                    pet_id = int(selecao.split("(")[-1].replace(")", ""))
+                    endereco_bd = {
+                        str(p[0]): p[2] for p in pets_lista
+                    }.get(str(pet_id), "")
+                    endereco_edit = st.text_input(
+                        f"Endereço {i}",
+                        value=endereco_bd,
+                        placeholder="Digite ou corrija",
+                        key=f"trans_end_{i}"
+                    )
+                    if endereco_edit:
+                        enderecos.append(endereco_edit)
+
+        # Se houver ao menos um endereço, monta rota e cálculos
+        if enderecos:
+            clinic = "Rua Demétrio Moreira da Luz, 1251, Caxias do Sul - RS"
+            pontos = [clinic] + enderecos + [clinic]
+            rota = "https://www.google.com/maps/dir/" + "/".join(
+                urllib.parse.quote(p) for p in pontos
+            )
+            st.markdown(f"<a href='{rota}' target='_blank'>🔗 Abrir rota no Google Maps</a>", unsafe_allow_html=True)
+            st.markdown("---")
+
+            # Entrada de km e valor por km
+            km_total = st.number_input(
+                "Distância total da rota (km)",
+                min_value=0.0,
+                step=0.1,
+                key="trans_km_total"
+            )
+            preco_km = st.number_input(
+                "Valor por km rodado (R$)",
+                value=4.00,
+                min_value=0.0,
+                step=0.1,
+                key="trans_preco_km"
+            )
+            valor_total = km_total * preco_km
+            st.markdown(f"**💰 Valor total estimado: R$ {valor_total:.2f}**")
+
+            # Novo campo: divisor editável
+            max_divs = len(enderecos)
+            divisor = st.number_input(
+                "Número de divisões",
+                value=max_divs,
+                min_value=1,
+                max_value=max_divs,
+                step=1,
+                key="trans_divisor"
+            )
+
+            # Cálculo e edição do valor individual
+            valor_sugerido = (valor_total / divisor) if divisor else 0.0
+            valor_individual = st.number_input(
+                "Valor cobrado por animal",
+                value=valor_sugerido,
+                step=0.1,
+                key="trans_valor_ind"
+            )
