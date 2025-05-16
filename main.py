@@ -95,17 +95,25 @@ except sqlite3.OperationalError:
 
 conn.commit()
 
+# ——— Migração: adiciona coluna 'servicos' em agendamentos ———
+try:
+    c.execute("ALTER TABLE agendamentos ADD COLUMN servicos TEXT")
+except sqlite3.OperationalError:
+    # coluna já existe
+    pass
+conn.commit()
+
 st.title("Sistema Tia Debora")
 
 with st.sidebar:
     st.header("Menu")
     menu = st.radio("", ["Cadastro de Pet", "Cadastro de Serviço", "Grupos de Serviços", "Registro de Serviço", "Agendamento", "Hoje", "Lembretes", "Consulta e Edição", "Transporte", "Ficha Individual"], key="menu_principal")
 
-
 try:
     c.execute("ALTER TABLE pets ADD COLUMN email TEXT")
 except sqlite3.OperationalError:
     pass
+
 
 # --- Cadastro de Pet ---
 if menu == "Cadastro de Pet":
@@ -221,76 +229,47 @@ elif menu == "Registro de Serviço":
 
 # --- Agendamento ---
 elif menu == "Agendamento":
-    st.header("Agendar banho ou serviço")
-    pets = c.execute("SELECT id, nome FROM pets").fetchall()
-    if pets:
-        pet = st.selectbox("Selecione o pet para agendamento", pets, format_func=lambda x: x[1])
-        data_agendamento = st.date_input("Data do agendamento", datetime.today(), format="DD/MM/YYYY")
-        if st.button("Agendar"):
-            c.execute("INSERT INTO agendamentos (pet_id, data) VALUES (?, ?)", (pet[0], data_agendamento))
-            conn.commit()
-            st.success("Agendamento salvo!")
-    else:
-        st.warning("Cadastre pets antes de agendar.")
+    st.header("📅 Novo Agendamento")
 
-# --- Lembretes ---
-elif menu == "Lembretes":
-    st.header("🔔 Lembretes")
+    # 1) Escolha do pet e da data
+    pets = c.execute("SELECT id, nome FROM pets ORDER BY nome").fetchall()
+    pet_id, pet_nome = st.selectbox(
+        "Pet",
+        pets,
+        format_func=lambda x: x[1],
+        key="ag_pet"
+    )
+    data_ag = st.date_input("Data do agendamento", key="ag_data")
 
-    # 1) Seleção de grupo
-    grupos_existentes = [g[0] for g in c.execute("SELECT nome FROM grupos ORDER BY nome").fetchall()]
-    grupo_escolhido = st.selectbox(
-        "Selecione o grupo de serviço",
-        grupos_existentes,
-        key="lembrete_grupo"
+    # 2) Seleção múltipla de **grupos de serviço**
+    grupos = [g[0] for g in c.execute("SELECT nome FROM grupos ORDER BY nome").fetchall()]
+    grupos_selecionados = st.multiselect(
+        "Grupos de serviços que serão realizados",
+        grupos,
+        key="ag_grupos"
     )
 
-    # 2) Carrega serviços do grupo
-    servicos_do_grupo = c.execute(
-        "SELECT id, nome, intervalo_dias FROM servicos WHERE grupo = ?",
-        (grupo_escolhido,)
-    ).fetchall()
-
-    if not servicos_do_grupo:
-        st.info("Não há serviços cadastrados neste grupo.")
-    else:
-        # 3) Definição do serviço para gerar lembretes
-        servico_escolhido = st.selectbox(
-            "Selecione o serviço para ver lembretes",
-            servicos_do_grupo,
-            format_func=lambda x: x[1],
-            key="lembrete_servico"
+    # 3) Botão para salvar
+    if st.button("Agendar", key="botao_agendar"):
+        # converte lista de grupos em texto para gravar
+        servs_str = "; ".join(grupos_selecionados)
+        c.execute(
+            "INSERT INTO agendamentos (pet_id, data, servicos) VALUES (?, ?, ?)",
+            (pet_id, data_ag, servs_str)
         )
-        serv_id, serv_nome, intervalo = servico_escolhido
+        conn.commit()
+        st.success(f"Agendamento criado para **{pet_nome}** em **{data_ag}**.")
 
-        # 4) Busca pets e histórico
-        pets = c.execute("SELECT id, nome FROM pets ORDER BY nome").fetchall()
-        hoje = datetime.today().date()
-        lembretes = []
-
-        for pet_id, pet_nome in pets:
-            ultima = c.execute(
-                "SELECT MAX(data) FROM historico_servicos WHERE servico_id = ? AND pet_id = ?",
-                (serv_id, pet_id)
-            ).fetchone()[0]
-
-            if ultima:
-                data_ultima = datetime.strptime(ultima, "%Y-%m-%d").date()
-                dias_passados = (hoje - data_ultima).days
-            else:
-                dias_passados = None
-
-            # Se intervalo definido e já passou, adiciona lembrete
-            if intervalo is not None and dias_passados is not None and dias_passados >= intervalo:
-                lembretes.append((pet_nome, dias_passados))
-
-        # 5) Exibe resultados
-        if lembretes:
-            st.markdown(f"**Lembretes para {serv_nome}:**")
-            for pet_nome, dias in lembretes:
-                st.write(f"- {pet_nome}: {dias} dias desde o último atendimento")
-        else:
-            st.success(f"Nenhum lembrete pendente para {serv_nome}.")
+        # 4) Relatório rápido dos agendamentos atuais
+        st.markdown("### 📋 Relatório de Agendamentos")
+        ags = c.execute("""
+            SELECT a.data, p.nome, a.servicos
+              FROM agendamentos a
+              JOIN pets p ON p.id = a.pet_id
+             ORDER BY a.data DESC
+        """).fetchall()
+        for data_, pet_, grupos_ in ags:
+            st.write(f"- **{data_}**  |  {pet_}  |  Grupos: {grupos_ or '–'}")
 
 # --- Hoje ---
 elif menu == "Hoje":
